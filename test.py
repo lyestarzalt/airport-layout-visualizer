@@ -1,12 +1,15 @@
 import math
 import tkinter as tk
+from tkinter import Canvas
 
+def mercator_projection(lat, lon, canvas_width, canvas_height):
+    map_width = 360.0
+    map_height = 180.0
 
-def equirectangular_projection(lat, long, width, height):
-    lat, long = math.radians(lat), math.radians(long)
-    R = 6371.0  # Earth's radius in km
-    x = R * long * math.cos(lat)
-    y = R * lat
+    x = (lon + 180.0) * (canvas_width / map_width)
+    y = (canvas_height / map_height) * (1 - math.log(math.tan(math.radians(lat)) + 1 /
+                                                     math.cos(math.radians(lat))) / math.pi) / 2 * map_height
+
     return x, y
 
 
@@ -69,7 +72,7 @@ def bezier_cubic_interpolation(t, p0, p1, p2, p3):
     )
 
 
-def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_points=1000):
+def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_points=100):
     interpolated_taxiways = []
 
     for taxiway in taxiways:
@@ -85,10 +88,14 @@ def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_point
                 ctrl_point1 = bezier_points[p1]
                 p2 = taxiway[(i + 1) % n]
 
+                cubic_interpolation_flag = False
                 if p2 in cubic_bezier_points:
                     # Cubic Bezier
-                    ctrl_point2, p3 = cubic_bezier_points[p2][0], cubic_bezier_points[p2][1]
+                    if len(cubic_bezier_points[p2]) >= 2:
+                        ctrl_point2, p3 = cubic_bezier_points[p2][0], cubic_bezier_points[p2][1]
+                        cubic_interpolation_flag = True
 
+                if cubic_interpolation_flag:
                     for t in range(1, num_points):
                         interpolated_taxiway.append(bezier_cubic_interpolation(
                             t / num_points, p1, ctrl_point1, ctrl_point2, p3))
@@ -104,7 +111,11 @@ def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_point
 
         interpolated_taxiways.append(interpolated_taxiway)
 
+
     return interpolated_taxiways
+
+
+
 
 
 def main():
@@ -117,7 +128,7 @@ def main():
     canvas_width, canvas_height = 800, 600
 
     projected_coords = [
-        [equirectangular_projection(
+        [mercator_projection(
             lat, lon, canvas_width, canvas_height) for lat, lon in path]
         for path in interpolated_taxiways
     ]
@@ -131,6 +142,18 @@ def main():
     root.title("Latitude and Longitude Path")
     canvas = tk.Canvas(root, width=canvas_width, height=canvas_height)
     canvas.pack()
+    
+    def on_mousewheel(event):
+        x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
+        zoom = 1.001 ** event.delta
+
+        canvas.scale("all", x, y, zoom, zoom)
+
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        
+
+
+    canvas.bind("<MouseWheel>", on_mousewheel)
 
     for path in projected_coords:
         normalized_path = [
@@ -142,7 +165,7 @@ def main():
         for i in range(len(normalized_path) - 1):
             x1, y1 = normalized_path[i]
             x2, y2 = normalized_path[i + 1]
-            canvas.create_line(x1, y1, x2, y2, fill="blue", width=2)
+            canvas.create_line(x1, y1, x2, y2, fill="blue", width=1)
 
     root.mainloop()
 
