@@ -2,6 +2,7 @@ import math
 import tkinter as tk
 from tkinter import Canvas
 
+
 def mercator_projection(lat, lon, canvas_width, canvas_height):
     map_width = 360.0
     map_height = 180.0
@@ -21,39 +22,55 @@ def normalize_coordinates(x, y, canvas_width, canvas_height, min_x, min_y, max_x
 
 def parse_apt_dat(file_path):
     taxiways = []
+    current_path = []
     bezier_points = {}
     cubic_bezier_points = {}
+    in_taxiway = False
 
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
+    with open(file_path, "r") as f:
+        for line in f:
+            tokens = line.strip().split()
+            try:
+                code = int(tokens[0])
+            except Exception:
+                continue
+            if code == 110:  # Pavement (taxiway or ramp) header
+                if in_taxiway:
+                    taxiways.append(current_path)
+                    current_path = []
+                else:
+                    in_taxiway = True
+                continue
 
-    for line in lines:
-        tokens = line.split()
+            if not in_taxiway:
+                continue
 
-        if len(tokens) > 1:
-            code = int(tokens[0])
-
-            if code in [100, 101, 102, 110, 120, 130]:
-                taxiways.append([])
-
-            elif code in [111, 112, 113, 114, 115, 116]:
+            if in_taxiway and code == 111:  # Node
                 lat, lon = float(tokens[1]), float(tokens[2])
-                taxiways[-1].append((lat, lon))
+                current_path.append((lat, lon))
 
-                if code == 112:
+                if len(tokens) > 3 and code != 111:  # Node with Bezier control point
                     ctrl_lat, ctrl_lon = float(tokens[3]), float(tokens[4])
                     bezier_points[(lat, lon)] = (ctrl_lat, ctrl_lon)
-
-                if code == 113:
-                    cubic_bezier_points[(lat, lon)] = []
-
-                if code == 112 and cubic_bezier_points:
-                    last_cubic_key = list(cubic_bezier_points.keys())[-1]
+            if code == 113:  # Node with implicit close of loop
+                current_path.append(current_path[0])
+                taxiways.append(current_path)
+                current_path = []
+                in_taxiway = False
+            if code in {112, 114}:  # Node with Bezier control point
+                lat, lon = float(tokens[1]), float(tokens[2])
+                current_path.append((lat, lon))
+                cubic_bezier_points[(lat, lon)] = []
+                if code in {112, 114}:  # Node with Bezier control point
                     ctrl_lat, ctrl_lon = float(tokens[3]), float(tokens[4])
-                    cubic_bezier_points[last_cubic_key].append(
+                    cubic_bezier_points[(lat, lon)].append(
                         (ctrl_lat, ctrl_lon))
 
-    return taxiways, bezier_points,  cubic_bezier_points
+
+    if in_taxiway:
+        taxiways.append(current_path)
+
+    return taxiways, bezier_points, cubic_bezier_points
 
 
 def bezier_interpolation(t, p0, p1, p2):
@@ -111,11 +128,7 @@ def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_point
 
         interpolated_taxiways.append(interpolated_taxiway)
 
-
     return interpolated_taxiways
-
-
-
 
 
 def main():
@@ -142,7 +155,7 @@ def main():
     root.title("Latitude and Longitude Path")
     canvas = tk.Canvas(root, width=canvas_width, height=canvas_height)
     canvas.pack()
-    
+
     def on_mousewheel(event):
         x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
         zoom = 1.001 ** event.delta
@@ -150,8 +163,6 @@ def main():
         canvas.scale("all", x, y, zoom, zoom)
 
         canvas.configure(scrollregion=canvas.bbox("all"))
-        
-
 
     canvas.bind("<MouseWheel>", on_mousewheel)
 
