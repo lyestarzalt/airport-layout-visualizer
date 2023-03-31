@@ -220,14 +220,18 @@ def main():
                                   canvas_height, min_x, min_y, max_x, max_y)
             for x, y in path
         ]
-
-        for i in range(len(normalized_path) - 1):
-            x1, y1 = normalized_path[i]
-            x2, y2 = normalized_path[i + 1]
-            canvas.create_line(x1, y1, x2, y2, fill="blue", width=1)
+        canvas.create_polygon(normalized_path, fill="blue",
+                              outline="black", width=1)
+    
+    
+    
     scale_x = canvas_width / (max_x - min_x)
     scale_y = canvas_height / (max_y - min_y)
     scale = min(scale_x, scale_y)
+    
+    
+    
+    
     for runway, projected_runway in zip(runways, projected_runways):
         width = runway[2]
         max_taxiway_distance = max(math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
