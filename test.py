@@ -1,6 +1,7 @@
 import math
 import tkinter as tk
 from tkinter import Canvas
+from math import radians, sin, cos
 
 
 def mercator_projection(lat, lon, canvas_width, canvas_height):
@@ -26,6 +27,7 @@ def parse_apt_dat(file_path):
     bezier_points = {}
     cubic_bezier_points = {}
     in_taxiway = False
+    runways = []
 
     with open(file_path, "r") as f:
         for line in f:
@@ -34,6 +36,12 @@ def parse_apt_dat(file_path):
                 code = int(tokens[0])
             except Exception:
                 continue
+            if code == 100:  # Runway
+
+                width = float(tokens[1])
+                lat1, lon1 = float(tokens[9]), float(tokens[10])
+                lat2, lon2 = float(tokens[18]), float(tokens[19])
+                runways.append([(lat1, lon1), (lat2, lon2), width])
             if code == 110:  # Pavement (taxiway or ramp) header
                 if in_taxiway:
                     taxiways.append(current_path)
@@ -66,11 +74,10 @@ def parse_apt_dat(file_path):
                     cubic_bezier_points[(lat, lon)].append(
                         (ctrl_lat, ctrl_lon))
 
-
     if in_taxiway:
         taxiways.append(current_path)
 
-    return taxiways, bezier_points, cubic_bezier_points
+    return taxiways, bezier_points, cubic_bezier_points, runways
 
 
 def bezier_interpolation(t, p0, p1, p2):
@@ -87,6 +94,38 @@ def bezier_cubic_interpolation(t, p0, p1, p2, p3):
         (1 - t) ** 3 * p0[1] + 3 * (1 - t) ** 2 * t *
         p1[1] + 3 * (1 - t) * t ** 2 * p2[1] + t ** 3 * p3[1]
     )
+
+
+def calculate_runway_corners(p1, p2, width):
+    lat1, lon1 = p1
+    lat2, lon2 = p2
+
+    d = haversine(lat1, lon1, lat2, lon2)
+    dx = (lat2 - lat1) / d
+    dy = (lon2 - lon1) / d
+
+    width_rad = width / (6371 * 1000)  # Convert width to radians
+
+    wx = width_rad * dy / 2
+    wy = width_rad * dx / 2
+
+    corners = [
+        (lat1 - wx, lon1 + wy),
+        (lat1 + wx, lon1 - wy),
+        (lat2 + wx, lon2 - wy),
+        (lat2 - wx, lon2 + wy)
+    ]
+
+    return corners
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth's radius in km
+    d_lat = radians(lat2 - lat1)
+    d_lon = radians(lon2 - lon1)
+    a = sin(d_lat / 2) ** 2 + cos(radians(lat1)) * \
+        cos(radians(lat2)) * sin(d_lon / 2) ** 2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_points=100):
@@ -133,7 +172,7 @@ def interpolate_taxiways(taxiways, bezier_points, cubic_bezier_points, num_point
 
 def main():
     apt_dat_file_path = "apt.dat"
-    taxiways, bezier_points, cubic_bezier_points = parse_apt_dat(
+    taxiways, bezier_points, cubic_bezier_points, runways = parse_apt_dat(
         apt_dat_file_path)
     interpolated_taxiways = interpolate_taxiways(
         taxiways, bezier_points, cubic_bezier_points)
@@ -146,10 +185,19 @@ def main():
         for path in interpolated_taxiways
     ]
 
-    min_x, min_y = min(p[0] for path in projected_coords for p in path), min(
-        p[1] for path in projected_coords for p in path)
-    max_x, max_y = max(p[0] for path in projected_coords for p in path), max(
-        p[1] for path in projected_coords for p in path)
+    projected_runways = [
+        [mercator_projection(lat, lon, canvas_width, canvas_height)
+         for lat, lon in runway[:2]]
+        for runway in runways
+    ]
+
+    min_x, min_y = min(min(p[0] for path in projected_coords for p in path), min(p[0] for runway in projected_runways for p in runway)), \
+        min(min(p[1] for path in projected_coords for p in path), min(p[1]
+            for runway in projected_runways for p in runway))
+
+    max_x, max_y = max(max(p[0] for path in projected_coords for p in path), max(p[0] for runway in projected_runways for p in runway)), \
+        max(max(p[1] for path in projected_coords for p in path), max(p[1]
+            for runway in projected_runways for p in runway))
 
     root = tk.Tk()
     root.title("Latitude and Longitude Path")
@@ -177,6 +225,20 @@ def main():
             x1, y1 = normalized_path[i]
             x2, y2 = normalized_path[i + 1]
             canvas.create_line(x1, y1, x2, y2, fill="blue", width=1)
+
+    for runway, original_runway in zip(runways, runways):
+        width = original_runway[2]
+        max_taxiway_distance = max(math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                                   for path in projected_coords for (x1, y1), (x2, y2) in zip(path[:-1], path[1:]))
+
+        geo_corners = calculate_runway_corners(runway[0], runway[1], width)
+        projected_corners = [mercator_projection(
+            lat, lon, canvas_width, canvas_height) for lat, lon in geo_corners]
+        normalized_corners = [normalize_coordinates(
+            x, y, canvas_width, canvas_height, min_x, min_y, max_x, max_y) for x, y in projected_corners]
+
+        canvas.create_polygon(normalized_corners, fill="red",
+                              outline="black", width=1)
 
     root.mainloop()
 
